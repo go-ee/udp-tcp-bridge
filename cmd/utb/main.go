@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -33,12 +34,12 @@ func main() {
 		cli.StringFlag{
 			Name:  fmt.Sprintf("%v, %v", flagSource, "s"),
 			Usage: "UDP server address",
-			Value: "localhost:27000",
+			Value: "localhost:47000",
 		},
 		cli.StringFlag{
 			Name:  fmt.Sprintf("%v, %v", flagTarget, "t"),
 			Usage: "TCP server address",
-			Value: "localhost:27001",
+			Value: "localhost:47001",
 		},
 		cli.BoolFlag{
 			Name:  flagPcapng,
@@ -56,9 +57,13 @@ func main() {
 			Action: func(c *cli.Context) (err error) {
 				l(c).Info("start")
 				var wg sync.WaitGroup
+				done := func(label string) {
+					l(c).Infof("%v completed", label)
+					wg.Done()
+				}
 
 				bridge := buildBridge(c)
-				bridge.Start(&wg)
+				bridge.Start(done)
 
 				wg.Wait()
 
@@ -80,34 +85,55 @@ func main() {
 			Action: func(c *cli.Context) (err error) {
 				l(c).Info("test")
 				var wg sync.WaitGroup
+				done := func(label string) {
+					l(c).Infof("%v completed", label)
+					wg.Done()
+				}
 
 				bridge := buildBridge(c)
 				wg.Add(1)
-				go bridge.Start(&wg)
+				go bridge.Start(done)
+
+				var targetFile *os.File
+				var targetFilePath string
+				if targetFilePath, err = filepath.Abs(c.String(flagTargetFile)); err != nil {
+					return
+				}
+
+				if targetFile, err = os.OpenFile(targetFilePath, os.O_APPEND|os.O_WRONLY, 0600); err != nil {
+					if targetFile, err = os.Create(c.String(flagTargetFile)); err != nil {
+						log.WithFields(log.Fields{
+							flagTargetFile: c.String(flagTargetFile),
+						}).Info("can't create file")
+						return
+					}
+				}
+
+				targetWriter := bufio.NewWriter(targetFile)
+				doneFlush := func(label string) {
+					targetWriter.Flush()
+					done(label)
+				}
+				wg.Add(1)
+				go bridge.StartTcpReceiver(doneFlush, targetWriter)
+
+				time.Sleep(100 * time.Millisecond)
 
 				var sourceFilePath string
 				if sourceFilePath, err = filepath.Abs(c.String(flagSourceFile)); err != nil {
 					log.WithFields(log.Fields{
 						flagSourceFile: c.String(flagSourceFile),
 					}).Info("can't find the file")
+					return
 				}
 
 				var sourceFile *os.File
 				if sourceFile, err = os.Open(sourceFilePath); err != nil {
-					log.WithFields(log.Fields{
-						"sourceFile": sourceFile,
-					}).Info("can't find the file")
 					return
 				}
 
-				//targetFilePath := c.String(flagTargetFile)
-				//var targetFile *os.File
-				//if targetFile, err = os.Open(targetFilePath); err != nil {
-				//	return
-				//}
-
 				wg.Add(1)
-				go bridge.StartUdpSender(&wg, sourceFile)
+				go bridge.StartUdpSender(done, sourceFile)
 
 				wg.Wait()
 
