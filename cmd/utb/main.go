@@ -71,7 +71,7 @@ func main() {
 			},
 		}, {
 			Name:  "test",
-			Usage: "Start and test UDP and TCP bridge",
+			Usage: "Start and transfer a source file to target file",
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:  fmt.Sprintf("%v, %v", flagSourceFile, "sf"),
@@ -79,7 +79,7 @@ func main() {
 				},
 				cli.StringFlag{
 					Name:  fmt.Sprintf("%v, %v", flagTargetFile, "tf"),
-					Usage: "target file to write the transfered file",
+					Usage: "target file to write the transferred file",
 				},
 			},
 			Action: func(c *cli.Context) (err error) {
@@ -103,7 +103,7 @@ func main() {
 				if targetFile, err = os.OpenFile(targetFilePath, os.O_APPEND|os.O_WRONLY, 0600); err != nil {
 					if targetFile, err = os.Create(c.String(flagTargetFile)); err != nil {
 						log.WithFields(log.Fields{
-							flagTargetFile: c.String(flagTargetFile),
+							flagTargetFile: targetFilePath,
 						}).Info("can't create file")
 						return
 					}
@@ -113,6 +113,7 @@ func main() {
 				doneFlush := func(label string) {
 					targetWriter.Flush()
 					done(label)
+					os.Exit(0)
 				}
 				wg.Add(1)
 				go bridge.StartTcpReceiver(doneFlush, targetWriter)
