@@ -22,6 +22,18 @@ type UdpTcpBridge struct {
 	Context       context.Context
 }
 
+var (
+	srcMac, _ = net.ParseMAC("AA:AA:AA:AA:AA:AA")
+	dstMac, _ = net.ParseMAC("BB:BB:BB:BB:BB:BB")
+	srcPort   = layers.UDPPort(40000)
+	dstPort   = layers.UDPPort(60000)
+	//srcIp =  ip(remAddr)
+	srcIp   = net.ParseIP("10.0.2.15")
+	dstIp   = net.ParseIP("10.0.2.255")
+	options = gopacket.SerializeOptions{}
+	rawUDP  = gopacket.NewSerializeBuffer()
+)
+
 func (o *UdpTcpBridge) Start(done func(label string)) {
 	defer done("bridge")
 
@@ -38,11 +50,11 @@ func (o *UdpTcpBridge) Start(done func(label string)) {
 	}
 	log.Infof("tcp connection established with %s\n", tcpConn.RemoteAddr())
 
-	pc, err := net.ListenPacket("udp", o.Source)
+	udpPacketConn, err := net.ListenPacket("udp", o.Source)
 	if err != nil {
 		panic(err)
 	}
-	defer pc.Close()
+	defer udpPacketConn.Close()
 	log.Infof("udp server started for %s\n", o.Source)
 
 	if o.WrapPcapng {
@@ -50,9 +62,9 @@ func (o *UdpTcpBridge) Start(done func(label string)) {
 		if err != nil {
 			panic(err)
 		}
-		go o.tcpNgWriter(tcpConn.RemoteAddr().String(), pc, ngWriter)
+		go o.tcpNgWriter(tcpConn.RemoteAddr(), udpPacketConn, ngWriter)
 	} else {
-		go o.tcpWriter(tcpConn.RemoteAddr().String(), pc, tcpConn)
+		go o.tcpWriter(tcpConn.RemoteAddr(), udpPacketConn, tcpConn)
 	}
 
 	select {
@@ -66,46 +78,57 @@ func (o *UdpTcpBridge) Start(done func(label string)) {
 	return
 }
 
-func (o *UdpTcpBridge) tcpWriter(label string, pc net.PacketConn, tcpConn net.Conn) {
-	buffer := make([]byte, o.MaxBufferSize)
+func (o *UdpTcpBridge) tcpWriter(remAddr net.Addr, udpPacketConn net.PacketConn, tcpConn net.Conn) {
+	label := remAddr.String()
+	udpData := make([]byte, o.MaxBufferSize)
 	for {
-		n, addr, err := pc.ReadFrom(buffer)
+		udpDataN, addr, err := udpPacketConn.ReadFrom(udpData)
 		if err != nil {
 			panic(err)
 		}
 
-		log.Infof("received from UDP: bytes=%d from=%s\n", n, addr.String())
+		data := udpData[:udpDataN]
 
-		data := buffer[:n]
+		log.Infof("received from UDP: bytes=%d from=%s, payload=%v\n", udpDataN, addr.String(), data)
 
-		n, err = tcpConn.Write(data)
+		rawData := o.rawUDP(data)
+		rawDataN := len(rawData)
+
+		_, err = tcpConn.Write(rawData)
 
 		if err != nil {
 			panic(err)
 		}
-		log.Infof("%v: written to TCP: bytes=%d\n", label, n)
+		log.Infof("%v: written to TCP: payload.bytes=%d, rawData.bytes=%d, rawData=%v\n",
+			label, udpDataN, rawDataN, rawData)
 	}
 }
 
-func (o *UdpTcpBridge) tcpNgWriter(label string, pc net.PacketConn, ngWriter *pcapgo.NgWriter) {
-	buffer := make([]byte, o.MaxBufferSize)
+func (o *UdpTcpBridge) tcpNgWriter(remAddr net.Addr, udpPacketConn net.PacketConn, ngWriter *pcapgo.NgWriter) {
+	label := remAddr.String()
+
+	udpData := make([]byte, o.MaxBufferSize)
 	for {
-		n, addr, err := pc.ReadFrom(buffer)
+		udpN, addr, err := udpPacketConn.ReadFrom(udpData)
 		if err != nil {
 			panic(err)
 		}
 
-		log.Infof("received from UDP: bytes=%d from=%s\n", n, addr.String())
+		data := udpData[:udpN]
 
-		data := buffer[:n]
+		log.Infof("received from UDP: bytes=%d from=%s, payload=%v\n", udpN, addr.String(), data)
+
+		rawData := o.rawUDP(data)
+		rawDataN := len(rawData)
 
 		ci := gopacket.CaptureInfo{
 			Timestamp:      time.Unix(0, 0).UTC(),
-			Length:         len(data),
-			CaptureLength:  len(data),
+			Length:         rawDataN,
+			CaptureLength:  rawDataN,
 			InterfaceIndex: 0,
 		}
-		err = ngWriter.WritePacket(ci, data)
+
+		err = ngWriter.WritePacket(ci, rawData)
 		if err != nil {
 			panic(err)
 		}
@@ -113,9 +136,27 @@ func (o *UdpTcpBridge) tcpNgWriter(label string, pc net.PacketConn, ngWriter *pc
 		if err != nil {
 			panic(err)
 		}
-
-		log.Infof("%v: written to NG TCP: bytes=%d\n", label, n)
+		log.Infof("%v: written to NG TCP: payload.bytes=%d, rawData.bytes=%d, rawData=%v\n",
+			label, udpN, rawDataN, rawData)
 	}
+}
+
+func (o *UdpTcpBridge) rawUDP(data []byte) []byte {
+	err := gopacket.SerializeLayers(rawUDP, options,
+		&layers.Ethernet{SrcMAC: srcMac, DstMAC: dstMac},
+		&layers.IPv4{
+			SrcIP: srcIp,
+			//DstIP: ip(addr),
+			DstIP: dstIp,
+		},
+		&layers.UDP{SrcPort: srcPort, DstPort: dstPort},
+		gopacket.Payload(data),
+	)
+	if err != nil {
+		panic(err)
+	}
+	ret := rawUDP.Bytes()
+	return ret
 }
 
 func (o *UdpTcpBridge) StartUdpSender(done func(label string), reader io.Reader) {
@@ -176,4 +217,14 @@ func (o *UdpTcpBridge) StartTcpReceiver(done func(label string), writer io.Write
 		log.Infof("packet-received and written: bytes=%d\n", n)
 		writer.Write(data[:n])
 	}
+}
+
+func ip(addr net.Addr) (ret net.IP) {
+	switch addr := addr.(type) {
+	case *net.UDPAddr:
+		ret = addr.IP
+	case *net.TCPAddr:
+		ret = addr.IP
+	}
+	return
 }
