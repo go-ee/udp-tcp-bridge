@@ -24,7 +24,7 @@ func main() {
 	runner.Usage = name
 	runner.Version = "1.0"
 
-	runner.Commands = []cli.Command{
+	runner.Commands = []*cli.Command{
 		{
 			Name:  "devices",
 			Usage: "List network devices",
@@ -37,21 +37,21 @@ func main() {
 			Name:  "openDevice",
 			Usage: "Open and listen to a device",
 			Flags: []cli.Flag{
-				cli.StringFlag{
+				&cli.StringFlag{
 					Name:  fmt.Sprintf("%v, %v", flagNetwork, "n"),
 					Usage: "device to open",
 				},
-				cli.StringFlag{
+				&cli.StringFlag{
 					Name:  fmt.Sprintf("%v, %v", flagFilter, "f"),
 					Usage: "packet filter to apply",
 					Value: "",
 				},
-				cli.StringFlag{
+				&cli.StringFlag{
 					Name:  fmt.Sprintf("%v, %v", flagSrcIp, "s"),
 					Usage: "consider packets only with the source ip",
 					Value: "",
 				},
-				cli.StringFlag{
+				&cli.StringFlag{
 					Name:  fmt.Sprintf("%v, %v", flagDstIp, "d"),
 					Usage: "consider packets only with the dest ip",
 					Value: "",

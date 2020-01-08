@@ -2,18 +2,21 @@ package main
 
 import (
 	"fmt"
+	"github.com/go-ee/utb/raw"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
-	"net"
 	"os"
 	"syscall"
 )
 
 const flagIp = "ip"
 const flagPort = "port"
-const flagIpProto = "proto"
+const flagType = "type"
+const flagProto = "proto"
+const flagBytes = "bytes"
 const flagMinBytes = "minBytes"
 const flagMaxBytes = "maxBytes"
+const flagLayers = "layers"
 
 func main() {
 
@@ -22,37 +25,62 @@ func main() {
 	runner.Usage = name
 	runner.Version = "1.0"
 
-	runner.Commands = []cli.Command{
+	runner.Commands = []*cli.Command{
 		{
 			Name:  "listen",
-			Usage: "Open raw socket and dump packets",
+			Usage: "Open Raw socket and dump packets",
 			Flags: []cli.Flag{
-				cli.StringFlag{
+				&cli.StringFlag{
 					Name:  flagIp,
 					Usage: "ip to open",
 				},
-				cli.IntFlag{
-					Name:  fmt.Sprintf("%v, %v", flagPort, "p"),
+				&cli.IntFlag{
+					Name:  fmt.Sprintf("%v, p", flagPort),
 					Usage: "port to open",
 				},
-				cli.IntFlag{
-					Name:  fmt.Sprintf("%v, %v", flagIpProto),
-					Usage: "default UDP (17)",
+				&cli.IntFlag{
+					Name: fmt.Sprintf("%v, t", flagType),
+					Usage: "default RAW (3), available 	SOCK_STREAM=1, SOCK_DGRAM=2, SOCK_RAW=3, SOCK_SEQPACKET=5",
+					Value: syscall.SOCK_RAW,
+				},
+				&cli.IntFlag{
+					Name:  fmt.Sprintf("%v, pr", flagProto),
+					Usage: "default UDP (17), available IPPROTO_IP=0,IPPROTO_IPV6=0x29, IPPROTO_TCP=6, IPPROTO_UDP=17",
 					Value: syscall.IPPROTO_UDP,
 				},
-				cli.IntFlag{
-					Name:  fmt.Sprintf("%v, %v", flagMinBytes, "min"),
+				&cli.BoolFlag{
+					Name:  fmt.Sprintf("%v, b", flagBytes),
+					Usage: "bytes to log?",
+				},
+				&cli.IntFlag{
+					Name:  fmt.Sprintf("%v, min", flagMinBytes),
 					Usage: "filter bytes >= min",
 				},
-				cli.IntFlag{
-					Name:  fmt.Sprintf("%v, %v", flagMaxBytes, "max"),
+				&cli.IntFlag{
+					Name:  fmt.Sprintf("%v, max", flagMaxBytes),
 					Usage: "filter bytes <= max",
+				},
+				&cli.BoolFlag{
+					Name:  fmt.Sprintf("%v, l", flagLayers),
+					Usage: "decode layers?",
 				},
 			},
 			Action: func(c *cli.Context) (err error) {
-				l(c).Info("raw")
-				raw(c.String(flagIp), c.Int(flagPort), c.Int(flagIpProto), c.Int(flagMinBytes), c.Int(flagMaxBytes))
-
+				l(c).Info("Raw")
+				bytes := c.Bool(flagBytes)
+				raw.Raw(c.String(flagIp), c.Int(flagPort), c.Int(flagType), c.Int(flagProto),
+					c.Int(flagMinBytes), c.Int(flagMaxBytes), c.Bool(flagLayers),
+					func(n int, data []byte, err error) {
+						if err != nil {
+							log.Infof("read error %v\n", err)
+						} else {
+							if bytes {
+								log.Infof("bytes=%d, data=%v, dump=\n%v\n", n, data, raw.Dump(data))
+							} else {
+								log.Infof("bytes=%d, data=%v, dump=\n%v\n", n, data, raw.Dump(data))
+							}
+						}
+					})
 				return
 			},
 		},
@@ -68,39 +96,10 @@ func l(c *cli.Context) *log.Entry {
 	return log.WithFields(log.Fields{
 		flagIp:       c.String(flagIp),
 		flagPort:     c.Int(flagPort),
-		flagIpProto:  c.Int(flagIpProto),
+		flagType:     c.Int(flagType),
+		flagProto:    c.Int(flagProto),
 		flagMinBytes: c.Int(flagMinBytes),
 		flagMaxBytes: c.Int(flagMaxBytes),
+		flagLayers:   c.Bool(flagLayers),
 	})
-}
-
-func raw(ip string, port int, ipProto int, minBytes int, maxBytes int) {
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, ipProto)
-	if err != nil {
-		log.Warnf("can't syscall.Socket, %v", err)
-		return
-	}
-	parsed := net.ParseIP(ip)
-	ip4 := [4]byte{parsed[0], parsed[1], parsed[3], parsed[4]}
-	sa := &syscall.SockaddrInet4{
-		Addr: ip4,
-		Port: port,
-	}
-	e := syscall.Bind(fd, sa)
-	if e != nil {
-		log.Warnf("can't syscall.Bind, %v", e)
-	}
-	f := os.NewFile(uintptr(fd), fmt.Sprintf("fd%d", fd))
-	log.Infof("Listening %v:%v, proto=%v, minBytes=%v, maxBytes=%v", ip, port, ipProto, minBytes, maxBytes)
-	for {
-		buf := make([]byte, 1024)
-		numRead, err := f.Read(buf)
-		if err != nil {
-			log.Infof("problems @ location 2")
-		}
-		if (minBytes == 0 || numRead >= minBytes) && (maxBytes == 0 || numRead <= maxBytes) {
-			log.Infof("bytes=%d, dump=%v\n", numRead, buf[:numRead])
-		}
-	}
-
 }

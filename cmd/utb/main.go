@@ -18,6 +18,7 @@ const flagName = "name"
 const flagSource = "source"
 const flagTarget = "target"
 const flagPcapng = "pcapng"
+const flagRaw = "raw"
 
 func main() {
 
@@ -26,31 +27,35 @@ func main() {
 	runner.Usage = name
 	runner.Version = "1.0"
 	runner.Flags = []cli.Flag{
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  fmt.Sprintf("%v, %v", flagName, "n"),
 			Usage: "name of the bridge, used for logging",
 			Value: "urb",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  fmt.Sprintf("%v, %v", flagSource, "s"),
 			Usage: "UDP server address",
 			Value: "localhost:47000",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  fmt.Sprintf("%v, %v", flagTarget, "t"),
 			Usage: "TCP server address",
 			Value: "localhost:47001",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  flagPcapng,
 			Usage: "wrap source UDP packets as PCAP-NG",
+		},
+		&cli.BoolFlag{
+			Name:  flagRaw,
+			Usage: "use UDP RAW Socket mode",
 		},
 	}
 
 	flagSourceFile := "sourceFile"
 	flagTargetFile := "targetFile"
 
-	runner.Commands = []cli.Command{
+	runner.Commands = []*cli.Command{
 		{
 			Name:  "start",
 			Usage: "Start bringe",
@@ -63,6 +68,7 @@ func main() {
 				}
 
 				bridge := buildBridge(c)
+				wg.Add(1)
 				bridge.Start(done)
 
 				wg.Wait()
@@ -73,11 +79,11 @@ func main() {
 			Name:  "test",
 			Usage: "Start and transfer a source file to target file",
 			Flags: []cli.Flag{
-				cli.StringFlag{
+				&cli.StringFlag{
 					Name:  fmt.Sprintf("%v, %v", flagSourceFile, "sf"),
 					Usage: "source file to transfer",
 				},
-				cli.StringFlag{
+				&cli.StringFlag{
 					Name:  fmt.Sprintf("%v, %v", flagTargetFile, "tf"),
 					Usage: "target file to write the transferred file",
 				},
@@ -151,20 +157,22 @@ func main() {
 
 func l(c *cli.Context) *log.Entry {
 	return log.WithFields(log.Fields{
-		flagName:   c.GlobalString(flagName),
-		flagSource: c.GlobalString(flagSource),
-		flagTarget: c.GlobalString(flagTarget),
-		flagPcapng: c.GlobalString(flagPcapng),
+		flagName:   c.String(flagName),
+		flagSource: c.String(flagSource),
+		flagTarget: c.String(flagTarget),
+		flagPcapng: c.String(flagPcapng),
+		flagRaw:    c.String(flagRaw),
 	})
 }
 
 func buildBridge(c *cli.Context) *utb.UdpTcpBridge {
 	duration := time.Duration(10000)
 	return &utb.UdpTcpBridge{
-		c.GlobalString(flagName),
-		c.GlobalString(flagSource),
-		c.GlobalString(flagTarget),
-		c.GlobalBool(flagPcapng),
+		c.String(flagName),
+		c.String(flagSource),
+		c.String(flagTarget),
+		c.Bool(flagPcapng),
+		c.Bool(flagRaw),
 		1024,
 		&duration,
 		context.Background()}
